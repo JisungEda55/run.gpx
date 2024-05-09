@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPX Visualizer</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        @font-face {
+            font-family: 'TTLaundryGothicB';
+            src: url('https://fastly.jsdelivr.net/gh/projectnoonnu/2403-2@1.0/TTLaundryGothicB.woff2') format('woff2');
+            font-weight: 700;
+            font-style: normal;
+        }
+        
+        body {
+            background-color: transparent; 
+            font-family: 'TTLaundryGothicB', sans-serif; 
+        }
+        
+        #map {
+            width: 500px;
+            height: 500px;
+            background-color: #f5f5f7; 
+            border-radius: 20px;
+            overflow: hidden;
+            position: relative; 
+        }
+
+        #map-container {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .map-background.hidden {
+            display: none;
+        }
+
+        #info {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 5px 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        #startAnimation, #toggleMap, #fileInput::-webkit-file-upload-button {
+            font-family: 'TTLaundryGothicB', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <h1>Run.GPX</h1>
+    <label for="fileInput" style="font-family: 'TTLaundryGothicB', sans-serif;">Pick GPX:</label>
+    <input type="file" id="fileInput" accept=".gpx" />
+    <label for="durationInput" style="font-family: 'TTLaundryGothicB', sans-serif;">Duration (min): </label>
+    <input type="number" id="durationInput" value="1" min="0.1" step="0.1" />
+    <button id="startAnimation" style="font-family: 'TTLaundryGothicB', sans-serif;">Run</button>
+    <button id="toggleMap" style="font-family: 'TTLaundryGothicB', sans-serif;">:D</button>
+    <div id="map-container">
+        <div id="map"></div>
+        <div id="info"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            var file = e.target.files[0];
+            var reader = new FileReader();
+            var map, gpxLayer, marker;
+
+            reader.onload = function(e) {
+                var gpxData = new DOMParser().parseFromString(e.target.result, 'text/xml');
+                var gpxCoordinates = [];
+
+                var trackPoints = gpxData.querySelectorAll('trkpt');
+                trackPoints.forEach(function(point) {
+                    var lat = parseFloat(point.getAttribute('lat'));
+                    var lon = parseFloat(point.getAttribute('lon'));
+                    gpxCoordinates.push([lat, lon]);
+                });
+
+                if (map) {
+                    map.remove();
+                }
+
+                map = L.map('map', {
+                    preferCanvas: true, // Use canvas renderer for better performance
+                    attributionControl: false, // Hide attribution control
+                    zoomControl: false // Hide zoom control
+                });
+
+                map.fitBounds(gpxCoordinates);
+
+                gpxLayer = L.polyline(gpxCoordinates, { color: '#07d959', weight: 8 }).addTo(map);
+
+                var startPoint = gpxCoordinates[0];
+                var durationInput = document.getElementById('durationInput');
+                var markerIcon = L.icon({
+                    iconUrl: 'https://em-content.zobj.net/source/microsoft-teams/363/man-running_1f3c3-200d-2642-fe0f.png', // 러너 이미지 파일 URL
+                    iconSize: [38, 38], // 이미지 사이즈 조절
+                    iconAnchor: [16, 16], // 이미지 앵커 조절
+                    className: 'running' // 클래스 추가
+                });
+
+                function startAnimation() {
+                    if (marker) {
+                        map.removeLayer(marker);
+                    }
+
+                    var duration = parseFloat(durationInput.value) * 60 * 1000; 
+                    var startTime = new Date().getTime();
+                    var endTime = startTime + duration;
+
+                    marker = L.marker(startPoint, { icon: markerIcon }).addTo(map);
+
+                    animateMarker(startTime, endTime, duration);
+                }
+
+                function animateMarker(startTime, endTime, duration) {
+                    var currentTime = new Date().getTime();
+                    var progress = (currentTime - startTime) / duration;
+                    if (progress >= 1) {
+                        return;
+                    }
+
+                    var index = Math.floor(progress * (gpxCoordinates.length - 1));
+                    var point = gpxCoordinates[index];
+                    marker.setLatLng(point);
+
+                    requestAnimationFrame(function() {
+                        animateMarker(startTime, endTime, duration);
+                    });
+                }
+
+                var totalDistance = calculateTotalDistance(gpxCoordinates);
+                var totalTime = calculateTotalTime(gpxData);
+
+                document.getElementById('info').innerHTML = 'Total Distance: ' + totalDistance.toFixed(2) + ' km<br>' +
+                                                              'Total Time: ' + formatTotalTime(totalTime);
+
+                startAnimation(); // Call startAnimation function here
+            };
+
+            reader.readAsText(file);
+        });
+
+        var mapVisible = true;
+        var toggleMapButton = document.getElementById('toggleMap');
+        toggleMapButton.addEventListener('click', function() {
+            var mapDiv = document.getElementById('map-container');
+            if (mapVisible) {
+                mapDiv.classList.add('hidden');
+                toggleMapButton.textContent = 'Show Map';
+            } else {
+                mapDiv.classList.remove('hidden');
+                toggleMapButton.textContent = 'Hide Map';
+            }
+            mapVisible = !mapVisible;
+        });
+
+        function calculateTotalDistance(coordinates) {
+            var totalDistance = 0;
+            for (var i = 1; i < coordinates.length; i++) {
+                var lat1 = coordinates[i - 1][0];
+                var lon1 = coordinates[i - 1][1];
+                var lat2 = coordinates[i][0];
+                var lon2 = coordinates[i][1];
+                totalDistance += calculateDistance(lat1, lon1, lat2, lon2);
+            }
+            return totalDistance;
+        }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            var R = 6371; // Radius of the Earth in km
+            var dLat = deg2rad(lat2 - lat1);
+            var dLon = deg2rad(lon2 - lon1);
+            var a =
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            var d = R * c; // Distance in km
+            return d;
+        }
+
+        function deg2rad(deg) {
+            return deg * (Math.PI / 180);
+        }
+
+        function calculateTotalTime(gpxData) {
+            var trackSegments = gpxData.querySelectorAll('trkseg');
+            var totalTime = 0;
+            trackSegments.forEach(function(segment) {
+                var trackPoints = segment.querySelectorAll('trkpt');
+                var startTime = new Date(trackPoints[0].querySelector('time').textContent).getTime();
+                var endTime = new Date(trackPoints[trackPoints.length - 1].querySelector('time').textContent).getTime();
+                totalTime += endTime - startTime;
+            });
+            return totalTime;
+        }
+
+        function formatTotalTime(milliseconds) {
+            var seconds = Math.floor(milliseconds / 1000);
+            var minutes = Math.floor(seconds / 60);
+            seconds %= 60;
+            var hours = Math.floor(minutes / 60);
+            minutes %= 60;
+            return pad(hours) + ':' + pad(minutes) + ':' + pad(seconds);
+        }
+
+        function pad(number) {
+            if (number < 10) {
+                return '0' + number;
+            }
+            return number;
+        }
+    </script>
+</body>
+</html>
